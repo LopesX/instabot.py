@@ -68,7 +68,7 @@ class InstaBot:
     # If you have 3 400 error in row - looks like you banned.
     error_400_to_ban = 3
     # If InstaBot think you are banned - going to sleep.
-    ban_sleep_time = 2 * 60 * 60
+    ban_sleep_time = 6 * 60 * 60
 
     # All counter.
     bot_mode = 0
@@ -116,7 +116,7 @@ class InstaBot:
     start_at_h = 0,
     start_at_m = 0,
     end_at_h = 23,
-    end_at_m = 59,
+    end_at_m = 59, 
 
     # For new_auto_mod
     next_iteration = {"Like": 0, "Follow": 0, "Unfollow": 0, "Comments": 0}
@@ -163,7 +163,7 @@ class InstaBot:
         self.follows_db_c = self.follows_db.cursor()
         check_and_update(self)
         fake_ua = UserAgent()
-        self.user_agent = check_and_insert_user_agent(self, str(fake_ua.random))
+        self.user_agent = ("Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36")
         self.bot_start = datetime.datetime.now()
         self.start_at_h = start_at_h
         self.start_at_m = start_at_m
@@ -282,7 +282,8 @@ class InstaBot:
         })
 
         r = self.s.get(self.url)
-        self.s.headers.update({'X-CSRFToken': r.cookies['csrftoken']})
+        csrf_token = re.search('(?<=\"csrf_token\":\")\w+', r.text).group(0)
+        self.s.headers.update({'X-CSRFToken': csrf_token})
         time.sleep(5 * random.random())
         login = self.s.post(
             self.url_login, data=self.login_post, allow_redirects=True)
@@ -866,7 +867,7 @@ class InstaBot:
                 url_tag = self.url_user_detail % (current_user)
                 try:
                     r = self.s.get(url_tag)
-                    all_data = json.loads(re.search('{"activity.+show_app', r.text, re.DOTALL).group(0)+'":""}')['entry_data']['ProfilePage'][0]
+                    all_data = json.loads(re.search(r'>window._sharedData = (.*?);</script>', r.text, re.DOTALL).group(1))['entry_data']['ProfilePage'][0]
 
                     user_info = all_data['graphql']['user']
                     i = 0
@@ -973,7 +974,7 @@ class InstaBot:
         if self.log_mod == 0:
             try:
                 now_time = datetime.datetime.now()
-                print(now_time.strftime("%d.%m.%Y_%H:%M")  + " " + log_text)
+                print(self.user_login + " at " + now_time.strftime("%d.%m.%Y_%H:%M") + " " + log_text)
             except UnicodeEncodeError:
                 print("Your text has unicode problem!")
         elif self.log_mod == 1:
