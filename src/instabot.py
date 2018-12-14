@@ -23,6 +23,7 @@ from .sql_updates import get_username_random, get_username_to_unfollow_random
 from .sql_updates import check_and_insert_user_agent
 from fake_useragent import UserAgent
 import re
+import instaloader
 
 class InstaBot:
     """
@@ -177,6 +178,7 @@ class InstaBot:
         self.tag_blacklist = tag_blacklist
         self.unfollow_whitelist = unfollow_whitelist
         self.comment_list = comment_list
+        self.instaload = instaloader.Instaloader()
 
         self.time_in_day = 24 * 60 * 60
         # Like
@@ -284,7 +286,9 @@ class InstaBot:
         })
 
         r = self.s.get(self.url)
-        self.s.headers.update({'X-CSRFToken': r.cookies['csrftoken']})
+        #self.s.headers.update({'X-CSRFToken': r.cookies['csrftoken']})
+        csrf_token = re.search('(?<=\"csrf_token\":\")\w+', r.text).group(0)
+        self.s.headers.update({'X-CSRFToken': csrf_token})
         time.sleep(5 * random.random())
         login = self.s.post(
             self.url_login, data=self.login_post, allow_redirects=True)
@@ -428,19 +432,28 @@ class InstaBot:
                 return ""
 
     def get_username_by_user_id(self, user_id):
-        """ Get username by user_id """
+        """ Get username by user_id on Instaloader """
         if self.login_status:
-            try:
-                url_info = self.api_user_detail % user_id
-                r = self.s.get(url_info, headers="")
-                all_data = json.loads(r.text)
-                username = all_data["user"]["username"]
-                return username
-            except:
-                logging.exception("Except on get_username_by_user_id")
-                return False
+            profile = instaloader.Profile.from_id(self.instaload.context,  user_id)
+            username = profile.username
+            return username
         else:
             return False
+
+    #def get_username_by_user_id(self, user_id):
+    #    """ Get username by user_id """
+    #    if self.login_status:
+    #        try:
+    #            url_info = self.api_user_detail % user_id
+    #            r = self.s.get(url_info, headers="")
+    #            all_data = json.loads(r.text)
+    #            username = all_data["user"]["username"]
+    #            return username
+    #        except:
+    #            logging.exception("Except on get_username_by_user_id")
+    #            return False
+    #    else:
+    #        return False
 
     def get_userinfo_by_name(self, username):
         """ Get user info by name """
@@ -456,7 +469,8 @@ class InstaBot:
                     follower = user_info['followed_by']['count']
                     follow_viewer = user_info['follows_viewer']
                     if follower > 3000 or follows > 1500:
-                        self.write_log('   >>>This is probably Selebgram, Business or Fake account')
+                        log_string = '   >>>This is probably Selebgram, Business or Fake account'
+                        self.write_log(log_string)
                     if follow_viewer:
                         return None
                     return user_info
@@ -535,8 +549,10 @@ class InstaBot:
                                 logging.exception("Except on like_all_exist_media")
                                 return False
 
-                            log_string = "Trying to like media: %s" % \
-                                         (self.media_by_tag[i]['node']['id'])
+                            log_string = "Trying to like media: %s (%s%s)" % \
+                                         (self.media_by_tag[i]['node']['id'],
+                                          "https://instagr.am/p/",
+                                          self.media_by_tag[i]['node']['shortcode'])
                             self.write_log(log_string)
                             like = self.like(self.media_by_tag[i]['node']['id'])
                             # comment = self.comment(self.media_by_tag[i]['id'], 'Cool!')
@@ -741,7 +757,8 @@ class InstaBot:
                 time.sleep(100)
 
     def remove_already_liked(self):
-        self.write_log("Removing already liked medias..")
+        log_string = 'Removing already liked medias...'
+        self.write_log(log_string)
         x = 0
         while x < len(self.media_by_tag):
             if check_already_liked(self, media_id=self.media_by_tag[x]['node']['id']) == 1:
@@ -765,6 +782,8 @@ class InstaBot:
             del self.media_by_tag[0]
 
     def new_auto_mod_follow(self):
+        if time.time() < self.next_iteration["Follow"]:
+            return
         if time.time() > self.next_iteration["Follow"] and \
                         self.follow_per_day != 0 and len(self.media_by_tag) > 0:
             if self.media_by_tag[0]['node']["owner"]["id"] == self.user_id:
@@ -778,6 +797,8 @@ class InstaBot:
             log_string = "Trying to follow: %s" % (
                 self.media_by_tag[0]['node']["owner"]["id"])
             self.write_log(log_string)
+            self.next_iteration["Follow"] = time.time() + \
+                                                self.add_time(self.follow_delay)
 
             if self.follow(self.media_by_tag[0]['node']["owner"]["id"]) != False:
                 self.bot_follow_list.append(
@@ -801,7 +822,10 @@ class InstaBot:
                 and len(self.media_by_tag) > 0 \
                 and self.check_exisiting_comment(self.media_by_tag[0]['node']['shortcode']) == False:
             comment_text = self.generate_comment()
-            log_string = "Trying to comment: %s" % (self.media_by_tag[0]['node']['id'])
+            log_string = "Trying to comment: %s (%s%s)" % \
+                                         (self.media_by_tag[0]['node']['id'],
+                                          "https://instagr.am/p/",
+                                          self.media_by_tag[0]['node']['shortcode'])
             self.write_log(log_string)
             if self.comment(self.media_by_tag[0]['node']['id'], comment_text) != False:
                 self.next_iteration["Comments"] = time.time() + \
@@ -908,37 +932,48 @@ class InstaBot:
                     if follows == 0 or follower / follows > 2:
                         self.is_selebgram = True
                         self.is_fake_account = False
-                        print('   >>>This is probably Selebgram account')
+                        log_string = "   >>>This is probably Selebgram account"
+                        self.write_log(log_string)
                     elif follower == 0 or follows / follower > 2:
                         self.is_fake_account = True
                         self.is_selebgram = False
-                        print('   >>>This is probably Fake account')
+                        log_string = "   >>>This is probably Fake account"
+                        self.write_log(log_string)
                     else:
                         self.is_selebgram = False
                         self.is_fake_account = False
-                        print('   >>>This is a normal account')
+                        log_string = "   >>>This is a normal account"
+                        self.write_log(log_string)
 
                     if media > 0 and follows / media < 25 and follower / media < 25:
                         self.is_active_user = True
-                        print('   >>>This user is active')
+
+                        log_string = "   >>>This user is active"
+                        self.write_log(log_string)
                     else:
                         self.is_active_user = False
-                        print('   >>>This user is passive')
+
+                        log_string = "   >>>This user is passive"
+                        self.write_log(log_string)
 
                     if follow_viewer or has_requested_viewer:
                         self.is_follower = True
-                        print("   >>>This account is following you")
+                        log_string = "   >>>This account is following you"
+                        self.write_log(log_string)
                     else:
                         self.is_follower = False
-                        print('   >>>This account is NOT following you')
+                        log_string = "   >>>This account is NOT following you"
+                        self.write_log(log_string)
 
                     if followed_by_viewer or requested_by_viewer:
                         self.is_following = True
-                        print('   >>>You are following this account')
+                        log_string = "   >>>You are following this account"
+                        self.write_log(log_string)
 
                     else:
                         self.is_following = False
-                        print('   >>>You are NOT following this account')
+                        log_string = "   >>>You are NOT following this account"
+                        self.write_log(log_string)
 
                 except:
                     logging.exception("Except on auto_unfollow!")
@@ -992,8 +1027,18 @@ class InstaBot:
 
         if self.log_mod == 0:
             try:
+                #now_time = datetime.datetime.now()
+                #print(now_time.strftime("%d.%m.%Y_%H:%M")  + " " + log_text)
+                #Write_log old above
+                #Write_log new below and working
+                #This new write_log show for us login + status total, so not need 
+                #roll-up to check each status and log_text(activity)
+                log_string = 'status: likes - %i, follow - %i, unfollow - %i' % \
+                     (self.like_counter, self.follow_counter, self.unfollow_counter)
                 now_time = datetime.datetime.now()
-                print(now_time.strftime("%d.%m.%Y_%H:%M")  + " " + log_text)
+                print(self.user_login + " | " + log_string + " " +
+                      now_time.strftime("%d.%m.%Y - %H:%M") +
+                      " " + log_text)
             except UnicodeEncodeError:
                 print("Your text has unicode problem!")
         elif self.log_mod == 1:
