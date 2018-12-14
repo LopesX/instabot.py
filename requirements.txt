@@ -1,2 +1,5 @@
 requests
+
 fake-useragent
+
+instaloader
